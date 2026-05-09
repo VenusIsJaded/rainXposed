@@ -487,22 +487,16 @@ object LogBoxModule : Module() {
 
     private fun showCustomBundleDialog(context: Context) {
         val colors = getM3Colors()
-        val filesDir = File(context.filesDir, "raincord")
-        val configFile = File(filesDir, "loader_config.json")
+        val filesDir = File(context.dataDir, Constants.FILES_DIR)
+        val configFile = File(filesDir, "loader.json")
         var currentUrl: String? = null
         var isEnabled = false
 
         if (configFile.exists()) {
             try {
-                val json = JSONObject(configFile.readText())
-                val custom = json.optJSONObject("customLoadUrl")
-                if (custom != null) {
-                    isEnabled = custom.optBoolean("enabled", false)
-                    currentUrl = custom.optString("url", "")
-                } else {
-                    isEnabled = false
-                    currentUrl = ""
-                }
+                val cfg = io.github.revenge.xposed.Utils.JSON.decodeFromString<io.github.revenge.xposed.modules.LoaderConfig>(configFile.readText())
+                isEnabled = cfg.customLoadUrl.enabled
+                currentUrl = cfg.customLoadUrl.url
             } catch (_: Exception) {
             }
         }
@@ -765,14 +759,25 @@ object LogBoxModule : Module() {
             filesDir.mkdirs()
             val configFile = File(filesDir, "loader.json")
 
-            val cfg = io.github.revenge.xposed.modules.LoaderConfig(
-                io.github.revenge.xposed.modules.CustomLoadUrl(enabled, url)
+            val existingCfg = if (configFile.exists()) {
+                try {
+                    io.github.revenge.xposed.Utils.JSON.decodeFromString<io.github.revenge.xposed.modules.LoaderConfig>(configFile.readText())
+                } catch (_: Exception) {
+                    io.github.revenge.xposed.modules.LoaderConfig()
+                }
+            } else {
+                io.github.revenge.xposed.modules.LoaderConfig()
+            }
+
+            val cfg = existingCfg.copy(
+                customLoadUrl = io.github.revenge.xposed.modules.CustomLoadUrl(enabled, url)
             )
 
             val jsonText = io.github.revenge.xposed.Utils.JSON.encodeToString(cfg)
             configFile.writeText(jsonText)
 
-            // remove cached bundle so UpdaterModule will fetch the custom one
+            io.github.revenge.xposed.modules.UpdaterModule.updateConfig(cfg)
+
             val cacheBundle = File(context.dataDir, "${Constants.CACHE_DIR}/${Constants.MAIN_SCRIPT_FILE}")
             if (enabled) {
                 if (cacheBundle.exists()) cacheBundle.delete()

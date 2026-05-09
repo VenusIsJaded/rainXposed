@@ -201,4 +201,8 @@ object UpdaterModule : Module() {
     fun isInjectionDisabled(context: Context? = null): Boolean {
         return if (::config.isInitialized) config.disableInjection else false
     }
+
+    fun updateConfig(newConfig: LoaderConfig) {
+        config = newConfig
+    }
 }
