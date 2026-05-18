@@ -48,5 +48,4 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
