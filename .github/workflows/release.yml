@@ -30,17 +30,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build unsigned APK
+      - name: Build APK
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease
+
+      - name: Debug APK output
+        run: |
+          echo "=== APK files ==="
+          find . -path "*/build/outputs/apk/*/*.apk" -not -path "*/node_modules/*"
 
       - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE }}
         run: |
           printf '%s' "$KEYSTORE_B64" | base64 -d > signing.keystore
-          ls -la signing.keystore
           keytool -list -keystore signing.keystore -storepass "${{ secrets.KEYSTORE_PASSWORD }}" -alias "${{ secrets.KEY_ALIAS }}" || { echo "::error::Keystore corrupted"; exit 1; }
 
       - name: Sign APK
@@ -49,8 +53,22 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -not -name "*signed*" -print -quit)
-          [ -z "$UNSIGNED" ] && { echo "::error::No unsigned APK found"; exit 1; }
+          # Find the unsigned APK (explicitly look for *-unsigned.apk or any release apk)
+          UNSIGNED=$(find . -path "*/build/outputs/apk/release/*-unsigned.apk" -print -quit)
+          
+          # Fallback: find any release APK if no explicit unsigned one exists
+          [ -z "$UNSIGNED" ] && UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          
+          [ -z "$UNSIGNED" ] && { echo "::error::No APK found in release directory"; exit 1; }
+          
+          echo "Found APK: $UNSIGNED"
+          
+          # If it's already named *-signed.apk, just use it directly
+          if echo "$UNSIGNED" | grep -q "\-signed\.apk$"; then
+            echo "APK already appears signed, using directly"
+            echo "SIGNED_APK=$UNSIGNED" >> "$GITHUB_ENV"
+            exit 0
+          fi
           
           SIGNED="${UNSIGNED%.apk}-signed.apk"
           
@@ -71,8 +89,8 @@ jobs:
         id: apk
         run: |
           APK="${{ env.SIGNED_APK }}"
-          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*signed*.apk" -print -quit)
-          [ -z "$APK" ] && { echo "::error::No signed APK found"; exit 1; }
+          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          [ -z "$APK" ] && { echo "::error::No APK found"; exit 1; }
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
