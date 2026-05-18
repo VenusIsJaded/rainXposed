@@ -1,0 +1,82 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: codeberg-medium
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install JDK 17 & Android SDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openjdk-17-jdk wget unzip python3
+          
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-*.zip -d $HOME/android-sdk/cmdline-tools/
+          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Find APK
+        id: apk
+        run: |
+          APK=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          [ -z "$APK" ] && { echo "::error::APK not found"; exit 1; }
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "name=$(basename $APK)" >> $GITHUB_OUTPUT
+
+      - name: Create Codeberg Release
+        id: release
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+          REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          
+          JSON=$(curl -s -X POST "https://codeberg.org/api/v1/repos/${OWNER}/${REPO}/releases" \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"body\":\"Automated release from CI.\",\"target_commitish\":\"main\"}")
+          
+          echo "response=$JSON" >> $GITHUB_OUTPUT
+          echo "$JSON"
+
+      - name: Upload APK to Release
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          OWNER=$(echo "${{ github.repository }}" | cut -d'/' -f1)
+          REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          
+          REL_JSON=$(curl -s "https://codeberg.org/api/v1/repos/${OWNER}/${REPO}/releases/tags/${TAG}" \
+            -H "Authorization: token ${TOKEN}")
+          REL_ID=$(echo "$REL_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          
+          curl -X POST "https://codeberg.org/api/v1/repos/${OWNER}/${REPO}/releases/${REL_ID}/assets?name=${APK_NAME}" \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"${APK_PATH}"
