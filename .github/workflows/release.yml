@@ -35,36 +35,44 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      - name: Sign APK
+      - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE }}
         run: |
-          # Decode keystore
-          echo "$KEYSTORE_B64" | base64 -d > signing.keystore
+          printf '%s' "$KEYSTORE_B64" | base64 -d > signing.keystore
+          ls -la signing.keystore
+          keytool -list -keystore signing.keystore -storepass "${{ secrets.KEYSTORE_PASSWORD }}" -alias "${{ secrets.KEY_ALIAS }}" || { echo "::error::Keystore corrupted"; exit 1; }
+
+      - name: Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -not -name "*signed*" -print -quit)
+          [ -z "$UNSIGNED" ] && { echo "::error::No unsigned APK found"; exit 1; }
           
-          # Find the unsigned APK
-          UNSIGNED=$(find . -path "*/build/outputs/apk/release/*-unsigned.apk" -print -quit)
-          [ -z "$UNSIGNED" ] && UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          SIGNED="${UNSIGNED%.apk}-signed.apk"
           
-          # Sign it
-          SIGNED="${UNSIGNED%-unsigned.apk}.apk"
-          SIGNED="${SIGNED%.apk}-signed.apk"
+          APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          [ -z "$APKSIGNER" ] && { echo "::error::apksigner not found"; exit 1; }
           
-          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+          "$APKSIGNER" sign \
             --ks signing.keystore \
-            --ks-pass pass:${{ secrets.KEYSTORE_PASSWORD }} \
-            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" \
             --in "$UNSIGNED" \
             --out "$SIGNED"
           
           echo "SIGNED_APK=$SIGNED" >> "$GITHUB_ENV"
-          echo "Signed: $SIGNED"
 
-      - name: Find APK for release
+      - name: Prepare release asset
         id: apk
         run: |
           APK="${{ env.SIGNED_APK }}"
-          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*.apk" -not -name "*unsigned*" -print -quit)
+          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*signed*.apk" -print -quit)
+          [ -z "$APK" ] && { echo "::error::No signed APK found"; exit 1; }
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
