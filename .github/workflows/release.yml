@@ -30,16 +30,41 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build APK
+      - name: Build unsigned APK
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      - name: Find APK
+      - name: Sign APK
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE }}
+        run: |
+          # Decode keystore
+          echo "$KEYSTORE_B64" | base64 -d > signing.keystore
+          
+          # Find the unsigned APK
+          UNSIGNED=$(find . -path "*/build/outputs/apk/release/*-unsigned.apk" -print -quit)
+          [ -z "$UNSIGNED" ] && UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          
+          # Sign it
+          SIGNED="${UNSIGNED%-unsigned.apk}.apk"
+          SIGNED="${SIGNED%.apk}-signed.apk"
+          
+          ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+            --ks signing.keystore \
+            --ks-pass pass:${{ secrets.KEYSTORE_PASSWORD }} \
+            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            --in "$UNSIGNED" \
+            --out "$SIGNED"
+          
+          echo "SIGNED_APK=$SIGNED" >> "$GITHUB_ENV"
+          echo "Signed: $SIGNED"
+
+      - name: Find APK for release
         id: apk
         run: |
-          APK=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
-          [ -z "$APK" ] && { echo "::error::APK not found"; exit 1; }
+          APK="${{ env.SIGNED_APK }}"
+          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*.apk" -not -name "*unsigned*" -print -quit)
           echo "path=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
