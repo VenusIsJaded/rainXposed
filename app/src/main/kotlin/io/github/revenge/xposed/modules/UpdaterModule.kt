@@ -52,7 +52,7 @@ object UpdaterModule : Module() {
     private const val ETAG_FILE = "etag.txt"
     private const val CONFIG_FILE = "loader.json"
 
-    private const val DEFAULT_BASE_URL = "https://codeberg.org/raincord/rain/releases/download/latest/"
+    private const val DEFAULT_BASE_URL = "https://github.com/VenusIsJaded/rain/releases/latest/download/"
     // This is rarely used as now we check for hbc first
     private const val DEFAULT_BUNDLE_NAME = "rain.js"
 
