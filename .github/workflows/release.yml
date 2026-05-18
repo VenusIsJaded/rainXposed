@@ -35,11 +35,6 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease
 
-      - name: Debug APK output
-        run: |
-          echo "=== APK files ==="
-          find . -path "*/build/outputs/apk/*/*.apk" -not -path "*/node_modules/*"
-
       - name: Decode keystore
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE }}
@@ -53,24 +48,11 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          # Find the unsigned APK (explicitly look for *-unsigned.apk or any release apk)
           UNSIGNED=$(find . -path "*/build/outputs/apk/release/*-unsigned.apk" -print -quit)
-          
-          # Fallback: find any release APK if no explicit unsigned one exists
           [ -z "$UNSIGNED" ] && UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
+          [ -z "$UNSIGNED" ] && { echo "::error::No APK found"; exit 1; }
           
-          [ -z "$UNSIGNED" ] && { echo "::error::No APK found in release directory"; exit 1; }
-          
-          echo "Found APK: $UNSIGNED"
-          
-          # If it's already named *-signed.apk, just use it directly
-          if echo "$UNSIGNED" | grep -q "\-signed\.apk$"; then
-            echo "APK already appears signed, using directly"
-            echo "SIGNED_APK=$UNSIGNED" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          
-          SIGNED="${UNSIGNED%.apk}-signed.apk"
+          SIGNED="rainXposed.apk"
           
           APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n1)
           [ -z "$APKSIGNER" ] && { echo "::error::apksigner not found"; exit 1; }
@@ -83,20 +65,12 @@ jobs:
             --in "$UNSIGNED" \
             --out "$SIGNED"
           
-          echo "SIGNED_APK=$SIGNED" >> "$GITHUB_ENV"
-
-      - name: Prepare release asset
-        id: apk
-        run: |
-          APK="${{ env.SIGNED_APK }}"
-          [ -z "$APK" ] && APK=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
-          [ -z "$APK" ] && { echo "::error::No APK found"; exit 1; }
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          ls -la "$SIGNED"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: ${{ steps.apk.outputs.path }}
+          files: rainXposed.apk
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
