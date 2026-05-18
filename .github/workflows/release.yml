@@ -5,10 +5,17 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release for'
+        required: true
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,6 +25,7 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -32,11 +40,12 @@ jobs:
         run: |
           APK=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
           [ -z "$APK" ] && { echo "::error::APK not found"; exit 1; }
-          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true
         env:
