@@ -52,8 +52,6 @@ jobs:
           [ -z "$UNSIGNED" ] && UNSIGNED=$(find . -path "*/build/outputs/apk/release/*.apk" -print -quit)
           [ -z "$UNSIGNED" ] && { echo "::error::No APK found"; exit 1; }
           
-          SIGNED="rainXposed.apk"
-          
           APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n1)
           [ -z "$APKSIGNER" ] && { echo "::error::apksigner not found"; exit 1; }
           
@@ -63,14 +61,12 @@ jobs:
             --key-pass env:KEY_PASSWORD \
             --ks-key-alias "$KEY_ALIAS" \
             --in "$UNSIGNED" \
-            --out "$SIGNED"
-          
-          ls -la "$SIGNED"
+            --out app-release.apk
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: rainXposed.apk
+          files: app-release.apk
           generate_release_notes: true
           token: ${{ secrets.GITHUB_TOKEN }}
