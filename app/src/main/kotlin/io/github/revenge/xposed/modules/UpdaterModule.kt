@@ -89,9 +89,9 @@ object UpdaterModule : Module() {
     }
 
     fun downloadScript(activity: Activity? = null, showUpdateDialog: Boolean = true, isExplicit: Boolean = false): Job = scope.launch {
-        if (!isExplicit && !config.customLoadUrl.enabled && bundle.exists()) {
-            return@launch
-        }
+        // NOTE: The old guard that returned early when the bundle existed was removed.
+        // The ETag / 304 mechanism below handles the "already up to date" case efficiently,
+        // so we always make the request and let the server decide.
 
         try {
             HttpClient(CIO) {
@@ -137,7 +137,7 @@ object UpdaterModule : Module() {
                         response.headers[HttpHeaders.ETag]?.let { etag.writeText(it) } ?: etag.delete()
                         Log.i("Bundle updated: ${bytes.size} bytes")
 
-                        if (activity != null) {
+                        if (showUpdateDialog && activity != null) {
                             withContext(Dispatchers.Main) {
                                 AlertDialog.Builder(activity)
                                     .setTitle("Update Successful")
