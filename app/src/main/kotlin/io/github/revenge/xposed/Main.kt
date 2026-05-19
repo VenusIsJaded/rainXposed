@@ -85,7 +85,7 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
                 }
 
                 this@Main.onActivity(act)
-                HookStateHolder.readyDeferred.complete(Unit)
+                if (!HookStateHolder.readyDeferred.isCompleted) HookStateHolder.readyDeferred.complete(Unit)
             }
         }
 
