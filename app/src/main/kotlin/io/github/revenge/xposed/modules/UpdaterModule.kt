@@ -22,6 +22,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.*
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -31,10 +32,98 @@ import java.lang.ref.WeakReference
 data class CustomLoadUrl(val enabled: Boolean = false, val url: String = "")
 
 @Serializable
-data class LoaderConfig(val customLoadUrl: CustomLoadUrl = CustomLoadUrl(), val disableInjection: Boolean = false)
+data class LoaderConfig(
+    val customLoadUrl: CustomLoadUrl = CustomLoadUrl(),
+    val disableInjection: Boolean = false,
+    val usePrereleases: Boolean = false,
+)
 
 @Serializable
-data class EndpointInfo(val paths: ArrayList<String>, val hash: String? = null, val version: String)
+data class GitHubReleaseAsset(
+    val name: String,
+    @SerialName("browser_download_url") val browserDownloadUrl: String,
+)
+
+@Serializable
+data class GitHubRelease(
+    @SerialName("tag_name") val tagName: String,
+    val prerelease: Boolean = false,
+    val draft: Boolean = false,
+    @SerialName("published_at") val publishedAt: String? = null,
+    val assets: List<GitHubReleaseAsset> = emptyList(),
+)
+
+private data class ParsedVersion(
+    val major: Int,
+    val minor: Int,
+    val patch: Int,
+    val prerelease: List<String>,
+) : Comparable<ParsedVersion> {
+    override fun compareTo(other: ParsedVersion): Int {
+        var cmp = major.compareTo(other.major)
+        if (cmp != 0) return cmp
+
+        cmp = minor.compareTo(other.minor)
+        if (cmp != 0) return cmp
+
+        cmp = patch.compareTo(other.patch)
+        if (cmp != 0) return cmp
+
+        if (prerelease.isEmpty() && other.prerelease.isEmpty()) return 0
+        if (prerelease.isEmpty()) return 1
+        if (other.prerelease.isEmpty()) return -1
+
+        for (index in 0 until maxOf(prerelease.size, other.prerelease.size)) {
+            val left = prerelease.getOrNull(index) ?: return -1
+            val right = other.prerelease.getOrNull(index) ?: return 1
+
+            cmp = comparePrereleaseIdentifier(left, right)
+            if (cmp != 0) return cmp
+        }
+
+        return 0
+    }
+}
+
+private fun comparePrereleaseIdentifier(left: String, right: String): Int {
+    val leftNumber = left.toIntOrNull()
+    val rightNumber = right.toIntOrNull()
+
+    return when {
+        leftNumber != null && rightNumber != null -> leftNumber.compareTo(rightNumber)
+        leftNumber != null -> -1
+        rightNumber != null -> 1
+        else -> left.compareTo(right)
+    }
+}
+
+private fun parseVersion(version: String): ParsedVersion? {
+    val sanitized = version.removePrefix("v").substringBefore('+')
+    val coreAndPrerelease = sanitized.split("-", limit = 2)
+    val coreParts = coreAndPrerelease[0].split(".")
+
+    if (coreParts.size < 3) return null
+
+    val major = coreParts[0].toIntOrNull() ?: return null
+    val minor = coreParts[1].toIntOrNull() ?: return null
+    val patch = coreParts[2].toIntOrNull() ?: return null
+    val prerelease = coreAndPrerelease.getOrNull(1)
+        ?.split(Regex("[.-]"))
+        ?.filter { it.isNotBlank() }
+        .orEmpty()
+
+    return ParsedVersion(major, minor, patch, prerelease)
+}
+
+private fun compareReleaseVersions(left: GitHubRelease, right: GitHubRelease): Int {
+    val leftVersion = parseVersion(left.tagName)
+    val rightVersion = parseVersion(right.tagName)
+
+    return when {
+        leftVersion != null && rightVersion != null -> leftVersion.compareTo(rightVersion)
+        else -> (left.publishedAt ?: "").compareTo(right.publishedAt ?: "")
+    }
+}
 
 object UpdaterModule : Module() {
     private lateinit var config: LoaderConfig
@@ -46,14 +135,14 @@ object UpdaterModule : Module() {
     private lateinit var cacheDir: File
     private lateinit var bundle: File
     private lateinit var etag: File
+    private lateinit var configFile: File
 
     private const val TIMEOUT_STRICT = 15000L
     private const val MIN_BYTECODE_SIZE = 512
     private const val ETAG_FILE = "etag.txt"
     private const val CONFIG_FILE = "loader.json"
-
+    private const val RELEASES_API_URL = "https://api.github.com/repos/VenusIsJaded/rain/releases"
     private const val DEFAULT_BASE_URL = "https://github.com/VenusIsJaded/rain/releases/latest/download/"
-    // This is rarely used as now we check for hbc first
     private const val DEFAULT_BUNDLE_NAME = "rain.js"
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = with(packageParam) {
@@ -62,8 +151,7 @@ object UpdaterModule : Module() {
 
         bundle = File(cacheDir, Constants.MAIN_SCRIPT_FILE)
         etag = File(cacheDir, ETAG_FILE)
-
-        val configFile = File(filesDir, CONFIG_FILE)
+        configFile = File(filesDir, CONFIG_FILE)
         config = runCatching {
             if (configFile.exists()) JSON.decodeFromString<LoaderConfig>(configFile.readText()) else LoaderConfig()
         }.getOrDefault(LoaderConfig())
@@ -78,7 +166,7 @@ object UpdaterModule : Module() {
             scope.launch { downloadScript(showUpdateDialog = false, isExplicit = true).join() }
             null
         }
-        
+
         BridgeModule.registerMethod("updater.reload") {
             scope.launch {
                 downloadScript(showUpdateDialog = false, isExplicit = true).join()
@@ -86,13 +174,15 @@ object UpdaterModule : Module() {
             }
             null
         }
+
+        BridgeModule.registerMethod("updater.setUsePrereleases") { args ->
+            val enabled = (args.getOrNull(0) as? Boolean) ?: false
+            persistConfig(readPersistedConfig().copy(usePrereleases = enabled))
+            null
+        }
     }
 
     fun downloadScript(activity: Activity? = null, showUpdateDialog: Boolean = true, isExplicit: Boolean = false): Job = scope.launch {
-        // NOTE: The old guard that returned early when the bundle existed was removed.
-        // The ETag / 304 mechanism below handles the "already up to date" case efficiently,
-        // so we always make the request and let the server decide.
-
         try {
             HttpClient(CIO) {
                 expectSuccess = false
@@ -118,7 +208,7 @@ object UpdaterModule : Module() {
                 when (response.status) {
                     HttpStatusCode.OK -> {
                         val bytes: ByteArray = response.body()
-                        
+
                         if (bytes.size < MIN_BYTECODE_SIZE) {
                             throw Exception("Payload too small (${bytes.size} bytes). Possible corrupt build.")
                         }
@@ -148,6 +238,7 @@ object UpdaterModule : Module() {
                             }
                         }
                     }
+
                     HttpStatusCode.NotModified -> Log.i("Bundle is up to date (304)")
                     else -> throw ResponseException(response, "HTTP ${response.status}")
                 }
@@ -166,35 +257,63 @@ object UpdaterModule : Module() {
         }
 
         return try {
-            val infoResponse = client.get("${DEFAULT_BASE_URL}info.json")
-            if (infoResponse.status == HttpStatusCode.OK) {
-                val info = JSON.decodeFromString<EndpointInfo>(infoResponse.bodyAsText())
-                val hermesVersion = withTimeoutOrNull(2000L) {
-                    runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
-                } ?: 96
-                
-                val hbcName = "rain.$hermesVersion.hbc"
-                when {
-                    info.paths.contains(hbcName) -> DEFAULT_BASE_URL + hbcName
-                    info.paths.contains("rain.min.js") -> DEFAULT_BASE_URL + "rain.min.js"
-                    else -> DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
-                }
-            } else DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
+            val release = resolveTargetRelease(client)
+            val assets = release?.assets.orEmpty().associateBy { it.name }
+            val hermesVersion = withTimeoutOrNull(2000L) {
+                runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
+            } ?: 96
+
+            assets["rain.$hermesVersion.hbc"]?.browserDownloadUrl
+                ?: assets["rain.min.js"]?.browserDownloadUrl
+                ?: assets[DEFAULT_BUNDLE_NAME]?.browserDownloadUrl
+                ?: DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
         } catch (e: Exception) {
             DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
         }
+    }
+
+    private suspend fun resolveTargetRelease(client: HttpClient): GitHubRelease? {
+        val response = client.get(RELEASES_API_URL)
+        if (response.status != HttpStatusCode.OK) return null
+
+        val releases = JSON.decodeFromString<List<GitHubRelease>>(response.bodyAsText())
+        val stableReleases = releases.filter { !it.draft && !it.prerelease }
+        val prereleaseReleases = releases.filter { !it.draft && it.prerelease }
+        val candidates = if (config.usePrereleases && prereleaseReleases.isNotEmpty()) {
+            prereleaseReleases
+        } else {
+            stableReleases
+        }
+
+        return candidates.maxWithOrNull { left, right -> compareReleaseVersions(left, right) }
     }
 
     override fun onActivity(activity: Activity) {
         lastActivity = WeakReference(activity)
     }
 
+    private fun persistConfig(newConfig: LoaderConfig) {
+        config = newConfig
+        if (::configFile.isInitialized) {
+            configFile.parentFile?.mkdirs()
+            configFile.writeText(JSON.encodeToString(newConfig))
+        }
+    }
+
+    private fun readPersistedConfig(): LoaderConfig {
+        return runCatching {
+            if (::configFile.isInitialized && configFile.exists()) {
+                JSON.decodeFromString<LoaderConfig>(configFile.readText())
+            } else {
+                config
+            }
+        }.getOrElse {
+            if (::config.isInitialized) config else LoaderConfig()
+        }
+    }
+
     fun setDisableInjection(context: Context, disabled: Boolean) {
-        val filesDir = File(context.dataDir, Constants.FILES_DIR).apply { mkdirs() }
-        val configFile = File(filesDir, CONFIG_FILE)
-        val newCfg = config.copy(disableInjection = disabled)
-        configFile.writeText(JSON.encodeToString(newCfg))
-        config = newCfg
+        persistConfig(readPersistedConfig().copy(disableInjection = disabled))
         Toast.makeText(context, "Injection ${if (disabled) "disabled" else "enabled"}", Toast.LENGTH_SHORT).show()
     }
 
@@ -203,6 +322,6 @@ object UpdaterModule : Module() {
     }
 
     fun updateConfig(newConfig: LoaderConfig) {
-        config = newConfig
+        persistConfig(newConfig)
     }
 }
