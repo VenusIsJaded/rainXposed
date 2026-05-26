@@ -95,21 +95,19 @@ object HookScriptLoaderModule : Module() {
     private fun HookScope.runCustomScripts(loadScriptFromFile: Method, loadScriptFromAssets: Method) {
         //Log.i("Running custom scripts...")
 
-        runBlocking {
-            val ready = async { HookStateHolder.readyDeferred.join() }
-            val isCustomUrl = UpdaterModule.isCustomUrlEnabled
+        val isCustomUrl = UpdaterModule.isCustomUrlEnabled
 
-            if (!mainScript.exists() || isCustomUrl) {
-                val reason = if (isCustomUrl) "Custom URL enabled" else "Main script does not exist"
-                //Log.i("$reason, downloading before load...")
-                val download =
-                    async { UpdaterModule.downloadScript(showUpdateDialog = false).join() }
+        if (!mainScript.exists() || isCustomUrl) {
+            // Only block the RN init thread if we absolutely MUST download the bundle
+            runBlocking {
+                val ready = async { HookStateHolder.readyDeferred.join() }
+                val download = async { UpdaterModule.downloadScript(showUpdateDialog = false).join() }
                 awaitAll(ready, download)
-            } else {
-                //Log.i("Main script exists, updating in background...")
-                UpdaterModule.downloadScript(showUpdateDialog = true)
-                ready.await()
             }
+        } else {
+            // PERF: Bundle exists locally! Do NOT wait for Activity.onCreate.
+            // Fire the background update and let Hermes load the bundle instantly.
+            UpdaterModule.downloadScript(showUpdateDialog = true)
         }
 
         val loadSynchronously = args[2]
