@@ -67,12 +67,12 @@ object BubbleModule : Module() {
         val messageViewClass = XposedHelpers.findClassIfExists(messageViewClassName, param.classLoader)
 
         if (messageViewClass == null) {
-            XposedBridge.log("[BubbleModule] MessageView class not found")
+            //XposedBridge.log("[BubbleModule] MessageView class not found")
             findAlternativeMessageClasses(param.classLoader)
             return
         }
 
-        XposedBridge.log("[BubbleModule] Found MessageView: $messageViewClass")
+        //XposedBridge.log("[BubbleModule] Found MessageView: $messageViewClass")
 
         try {
             val methods = messageViewClass.declaredMethods
@@ -80,8 +80,8 @@ object BubbleModule : Module() {
             val configureAuthorMethod = methods.find { it.name == "configureAuthor" }
 
             if (configureAccessoriesMarginMethod != null) {
-                XposedBridge.log("[BubbleModule] configureAccessoriesMargin signature: ${configureAccessoriesMarginMethod.parameterTypes.joinToString()}")
-                XposedBridge.log("[BubbleModule] Hooking configureAccessoriesMargin...")
+                //XposedBridge.log("[BubbleModule] configureAccessoriesMargin signature: ${configureAccessoriesMarginMethod.parameterTypes.joinToString()}")
+                //XposedBridge.log("[BubbleModule] Hooking configureAccessoriesMargin...")
                 configureAccessoriesMarginHook = XposedBridge.hookMethod(configureAccessoriesMarginMethod, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
                         if (!hooksEnabled) return
@@ -90,31 +90,31 @@ object BubbleModule : Module() {
                         accessoriesView?.let { adjustMarginsForAccessories(it) }
                     }
                 })
-                XposedBridge.log("[BubbleModule] configureAccessoriesMargin hooked!")
+                //XposedBridge.log("[BubbleModule] configureAccessoriesMargin hooked!")
             } else {
-                XposedBridge.log("[BubbleModule] configureAccessoriesMargin method not found")
+                //XposedBridge.log("[BubbleModule] configureAccessoriesMargin method not found")
             }
 
             if (configureAuthorMethod != null) {
-                XposedBridge.log("[BubbleModule] configureAuthor signature: ${configureAuthorMethod.parameterTypes.joinToString()}")
-                XposedBridge.log("[BubbleModule] Hooking configureAuthor...")
+                //XposedBridge.log("[BubbleModule] configureAuthor signature: ${configureAuthorMethod.parameterTypes.joinToString()}")
+                //XposedBridge.log("[BubbleModule] Hooking configureAuthor...")
                 configureAuthorHook = XposedBridge.hookMethod(configureAuthorMethod, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
                         if (!hooksEnabled) return
-                        XposedBridge.log("[BubbleModule] configureAuthor called")
+                        //XposedBridge.log("[BubbleModule] configureAuthor called")
                         val view = param.thisObject as ViewGroup
                         applyRoundedSquareProfilePicture(view)
                         applyBubbleChat(view)
                     }
                 })
-                XposedBridge.log("[BubbleModule] configureAuthor hooked!")
+                //XposedBridge.log("[BubbleModule] configureAuthor hooked!")
             } else {
-                XposedBridge.log("[BubbleModule] configureAuthor method not found")
+                //XposedBridge.log("[BubbleModule] configureAuthor method not found")
             }
 
             hooked = true
         } catch (e: Throwable) {
-            XposedBridge.log("[BubbleModule] Failed to hook methods: ${e.message}")
+            //XposedBridge.log("[BubbleModule] Failed to hook methods: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -202,7 +202,7 @@ object BubbleModule : Module() {
             accessoriesView.setPadding(PADDING_LARGE, if (start) PADDING_MEDIUM else 0, PADDING_SMALL, PADDING_MEDIUM)
             accessoriesView.translationX = -PADDING_SMALL.toFloat()
         } catch (e: Throwable) {
-            XposedBridge.log("[BubbleModule] setAccessoryBubbleBackground failed: ${e.message}")
+            //XposedBridge.log("[BubbleModule] setAccessoryBubbleBackground failed: ${e.message}")
         }
     }
 
@@ -256,9 +256,9 @@ object BubbleModule : Module() {
                 val className = "$pkg$suffix"
                 val clazz = XposedHelpers.findClassIfExists(className, classLoader)
                 if (clazz != null) {
-                    XposedBridge.log("[BubbleModule] Found class: $className")
+                    //XposedBridge.log("[BubbleModule] Found class: $className")
                     val methods = clazz.declaredMethods.map { it.name }.distinct()
-                    XposedBridge.log("[BubbleModule]   Methods: $methods")
+                    //XposedBridge.log("[BubbleModule]   Methods: $methods")
                 }
             }
         }
