@@ -47,7 +47,7 @@ class PluginsModule : Module() {
             states = PluginStates(
                 flags as Map<String, Double>
             ).apply { saveToFile(statesFile) }
-            //Log.i("Plugin states saved: ${statesFile.absolutePath}")
+            Log.i("Plugin states saved: ${statesFile.absolutePath}")
         }
     }
 }
@@ -99,7 +99,7 @@ data class PluginStates(
                     }
                 }
             } catch (e: UnsupportedPluginStatesVersionException) {
-                //Log.i(e.message!!)
+                Log.i(e.message!!)
             } catch (e: EOFException) {
                 Log.e("Plugin states corrupt: ${e.message}")
             } catch (e: IOException) {

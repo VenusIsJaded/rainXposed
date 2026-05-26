@@ -18,7 +18,7 @@ object BlockCrashReportingModule : Module() {
             runCatching {
                 hookMethod("isDisabled") {
                     before {
-                        //Log.i("Forced CrashReporting.isDisabled() to true")
+                        Log.i("Forced CrashReporting.isDisabled() to true")
                         result = true
                     }
                 }
@@ -30,7 +30,7 @@ object BlockCrashReportingModule : Module() {
                     "init", Context::class.java, String::class.java
                 ) {
                     before {
-                        //Log.i("Blocked CrashReporting initialization")
+                        Log.i("Blocked CrashReporting initialization")
                         result = null
                     }
                 }
@@ -40,7 +40,7 @@ object BlockCrashReportingModule : Module() {
         val sentryInitProviderClass = classLoader.safeLoadClass("io.sentry.android.core.SentryInitProvider")
         sentryInitProviderClass?.hookMethod("onCreate") {
             before {
-                //Log.i("Blocked SentryInitProvider initialization")
+                Log.i("Blocked SentryInitProvider initialization")
                 result = true
             }
         }

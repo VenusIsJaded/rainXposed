@@ -65,7 +65,7 @@ object BridgeModule : Module() {
      * @param callback The callback to invoke when the method is called.
      */
     fun registerMethod(name: String, callback: BridgeMethodCallback) {
-        if (methods.containsKey(name)) //Log.w("Bridge method already exists and will be overridden: $name")
+        if (methods.containsKey(name)) Log.w("Bridge method already exists and will be overridden: $name")
         methods[name] = callback
     }
 

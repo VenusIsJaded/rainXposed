@@ -15,7 +15,7 @@ object BlockDeepLinksTrackingModule : Module() {
             "init", Context::class.java
         ) {
             before {
-                //Log.i("Blocked DeepLinks tracking initialization")
+                Log.i("Blocked DeepLinks tracking initialization")
                 result = null
             }
         }

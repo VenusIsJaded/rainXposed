@@ -77,14 +77,14 @@ object HookScriptLoaderModule : Module() {
 
         loadScriptFromAssets.hook {
             before {
-                //Log.i("Received call to loadScriptFromAssets: ${args[1]} (sync: ${args[2]})")
+                Log.i("Received call to loadScriptFromAssets: ${args[1]} (sync: ${args[2]})")
                 runCustomScripts(loadScriptFromFile, loadScriptFromAssets)
             }
         }
 
         loadScriptFromFile.hook {
             before {
-                //Log.i("Received call to loadScriptFromFile: ${args[0]} (sync: ${args[2]})")
+                Log.i("Received call to loadScriptFromFile: ${args[0]} (sync: ${args[2]})")
                 runCustomScripts(loadScriptFromFile, loadScriptFromAssets)
             }
         }
@@ -93,7 +93,7 @@ object HookScriptLoaderModule : Module() {
     }
 
     private fun HookScope.runCustomScripts(loadScriptFromFile: Method, loadScriptFromAssets: Method) {
-        //Log.i("Running custom scripts...")
+        Log.i("Running custom scripts...")
 
         val isCustomUrl = UpdaterModule.isCustomUrlEnabled
 
@@ -112,7 +112,7 @@ object HookScriptLoaderModule : Module() {
 
         val loadSynchronously = args[2]
         val runScriptFile = { file: File ->
-            //Log.i("Loading script: ${file.absolutePath}")
+            Log.i("Loading script: ${file.absolutePath}")
 
             XposedBridge.invokeOriginalMethod(
                 loadScriptFromFile, thisObject, arrayOf(file.absolutePath, file.absolutePath, loadSynchronously)
@@ -136,11 +136,11 @@ object HookScriptLoaderModule : Module() {
             }
 
             if (injectionDisabled) {
-                //Log.i("Bundle injection disabled by loader config - skipping main bundle execution")
+                Log.i("Bundle injection disabled by loader config - skipping main bundle execution")
             } else {
                 if (mainScript.exists()) runScriptFile(mainScript)
                 else {
-                    //Log.i("Main script does not exist, falling back")
+                    Log.i("Main script does not exist, falling back")
 
                     if (!::resources.isInitialized) resources = XModuleResources.createInstance(modulePath, null)
 

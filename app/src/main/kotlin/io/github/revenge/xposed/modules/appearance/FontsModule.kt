@@ -85,7 +85,7 @@ object FontsModule : Module() {
             if (!fileName.startsWith(".")) {
                 val fontName = fileName.split('.')[0]
                 if (fontDef.main.keys.none { it == fontName }) {
-                    //Log.i("Deleting font file: $fileName")
+                    Log.i("Deleting font file: $fileName")
                     file.delete()
                 }
             }
@@ -97,7 +97,7 @@ object FontsModule : Module() {
                 async {
                     val url = fontDef.main.getValue(name)
                     try {
-                        //Log.i("Downloading $name from $url")
+                        Log.i("Downloading $name from $url")
                         val file =
                             File(fontsDir, "$name${FILE_EXTENSIONS.first { url.endsWith(it) }}").apply { asFile() }
                         if (file.exists()) return@async
