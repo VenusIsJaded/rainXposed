@@ -70,7 +70,7 @@ object CacheModule : Module() {
             modulesCache = ModulesCache(
                 blacklist as ArrayList<Double>, finds as HashMap<String, HashMap<String, Double>?>
             ).apply { saveToFile(modulesCacheFile) }
-            Log.i("Modules cache saved: ${modulesCacheFile.absolutePath} (blacklisted: ${blacklist.size}, finds: ${finds.size})")
+            //Log.i("Modules cache saved: ${modulesCacheFile.absolutePath} (blacklisted: ${blacklist.size}, finds: ${finds.size})")
         }
 
         BridgeModule.registerMethod("revenge.caches.assets.read") {
@@ -86,7 +86,7 @@ object CacheModule : Module() {
             @Suppress("UNCHECKED_CAST")
             assetsCache =
                 AssetsCache(data as HashMap<String, HashMap<String, Double>>).apply { saveToFile(assetsCacheFile) }
-            Log.i("Assets cache saved: ${assetsCacheFile.absolutePath} (count: ${data.size})")
+            //Log.i("Assets cache saved: ${assetsCacheFile.absolutePath} (count: ${data.size})")
         }
     }
 }
@@ -176,7 +176,7 @@ data class ModulesCache(
                     return ModulesCache(blacklist, finds)
                 }
             } catch (e: CacheVersionMismatchException) {
-                Log.i("Modules cache version mismatch: ${e.message}")
+                //Log.i("Modules cache version mismatch: ${e.message}")
             } catch (e: EOFException) {
                 Log.e("Modules cache corrupt: ${e.message}")
             } catch (e: IOException) {
@@ -257,7 +257,7 @@ data class AssetsCache(
                     return AssetsCache(data)
                 }
             } catch (e: CacheVersionMismatchException) {
-                Log.i("Assets cache version mismatch: ${e.message}")
+                //Log.i("Assets cache version mismatch: ${e.message}")
             } catch (e: EOFException) {
                 Log.e("Assets cache corrupt: ${e.message}")
             } catch (e: IOException) {

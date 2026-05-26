@@ -195,7 +195,7 @@ object UpdaterModule : Module() {
                 install(HttpRedirect) { checkHttpMethod = false }
             }.use { client ->
                 val targetUrl = resolveTargetUrl(client)
-                Log.i("Fetching bundle: $targetUrl")
+                //Log.i("Fetching bundle: $targetUrl")
 
                 val response: HttpResponse = client.get(targetUrl) {
                     headers {
@@ -225,7 +225,7 @@ object UpdaterModule : Module() {
                         }
 
                         response.headers[HttpHeaders.ETag]?.let { etag.writeText(it) } ?: etag.delete()
-                        Log.i("Bundle updated: ${bytes.size} bytes")
+                        //Log.i("Bundle updated: ${bytes.size} bytes")
 
                         if (showUpdateDialog && activity != null) {
                             withContext(Dispatchers.Main) {
@@ -239,7 +239,7 @@ object UpdaterModule : Module() {
                         }
                     }
 
-                    HttpStatusCode.NotModified -> Log.i("Bundle is up to date (304)")
+                    HttpStatusCode.NotModified -> //Log.i("Bundle is up to date (304)")
                     else -> throw ResponseException(response, "HTTP ${response.status}")
                 }
             }

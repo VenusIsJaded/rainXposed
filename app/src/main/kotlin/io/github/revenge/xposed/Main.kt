@@ -57,7 +57,13 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
     }
 
     override fun initZygote(startupParam: IXposedHookZygoteInit.StartupParam) {
-        for (module in modules) module.onInit(startupParam)
+        // PERF: Only initialize critical hooks in Zygote. Defer UI/Updater to save boot time.
+        for (module in modules) {
+            val name = module::class.simpleName
+            if (name != "UpdaterModule" && name != "ThemesModule" && name != "FontsModule" && name != "SysColorsModule") {
+                module.onInit(startupParam)
+            }
+        }
     }
 
     override fun handleLoadPackage(param: XC_LoadPackage.LoadPackageParam) = with(param) {
@@ -69,7 +75,7 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
             after {
                 val ctx = args[0] as Context
                 HookStateHolder.gotContext = true
-                Log.i("Received Context")
+                //Log.i("Received Context")
                 this@Main.onContext(ctx)
             }
         }
@@ -77,10 +83,10 @@ class Main : Module(), IXposedHookLoadPackage, IXposedHookZygoteInit {
         reactActivity.hookMethod("onCreate", Bundle::class.java) {
             after {
                 val act = thisObject as Activity
-                Log.i("Received Activity")
+                //Log.i("Received Activity")
 
                 if (!HookStateHolder.gotContext) {
-                    Log.w("Activity created before we got Context, process may have been recreated!")
+                    //Log.w("Activity created before we got Context, process may have been recreated!")
                     this@Main.onContext(act.applicationContext)
                 }
 
