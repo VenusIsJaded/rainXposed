@@ -7,7 +7,11 @@ class Constants {
 
         const val FILES_DIR = "files/rain"
         const val CACHE_DIR = "cache/rain"
-        const val MAIN_SCRIPT_FILE = "bundle.hbc"
+        // Store the fetched payload as JS. Even when the source URL is a .hbc
+        // fallback, the default path should not imply Hermes bytecode: several
+        // Discord/Hermes versions crash with "Buffer misaligned" when loading
+        // external bytecode files.
+        const val MAIN_SCRIPT_FILE = "bundle.js"
 
 
         const val LOG_TAG = "Rain"
