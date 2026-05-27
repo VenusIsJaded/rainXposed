@@ -778,9 +778,8 @@ object LogBoxModule : Module() {
 
             io.github.revenge.xposed.modules.UpdaterModule.updateConfig(cfg)
 
-            val cacheBundle = File(context.dataDir, "${Constants.CACHE_DIR}/${Constants.MAIN_SCRIPT_FILE}")
             if (enabled) {
-                if (cacheBundle.exists()) cacheBundle.delete()
+                UpdaterModule.clearCachedBundles()
                 Toast.makeText(context, "Custom bundle enabled", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "Custom bundle disabled", Toast.LENGTH_SHORT).show()

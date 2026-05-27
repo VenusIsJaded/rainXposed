@@ -9,7 +9,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
 import dev.rushii.libunbound.LibUnbound
 import io.github.revenge.xposed.Constants
 import io.github.revenge.xposed.Module
-import io.github.revenge.xposed.Utils
 import io.github.revenge.xposed.Utils.Companion.JSON
 import io.github.revenge.xposed.Utils.Companion.reloadApp
 import io.github.revenge.xposed.Utils.Log
@@ -27,15 +26,40 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.io.File
 import java.lang.ref.WeakReference
+import java.util.zip.ZipFile
 
 @Serializable
 data class CustomLoadUrl(val enabled: Boolean = false, val url: String = "")
+
+@Serializable
+enum class BundleFormat {
+    @SerialName("hbc")
+    HBC,
+
+    @SerialName("js")
+    JS,
+}
 
 @Serializable
 data class LoaderConfig(
     val customLoadUrl: CustomLoadUrl = CustomLoadUrl(),
     val disableInjection: Boolean = false,
     val usePrereleases: Boolean = false,
+    /**
+     * Optional runtime override. When null, RainXposed follows the per-app
+     * install option embedded by Rain Manager in rain.json.
+     */
+    val bundleFormat: BundleFormat? = null,
+)
+
+@Serializable
+private data class EmbeddedInstallMetadata(
+    val options: EmbeddedPatchOptions = EmbeddedPatchOptions(),
+)
+
+@Serializable
+private data class EmbeddedPatchOptions(
+    val bundleFormat: BundleFormat = BundleFormat.HBC,
 )
 
 @Serializable
@@ -133,32 +157,33 @@ object UpdaterModule : Module() {
     private var lastActivity: WeakReference<Activity>? = null
 
     private lateinit var cacheDir: File
-    private lateinit var bundle: File
-    private lateinit var etag: File
     private lateinit var configFile: File
+    private var embeddedBundleFormat: BundleFormat = BundleFormat.HBC
+    private var activeBundleFormat: BundleFormat = BundleFormat.HBC
 
     private const val TIMEOUT_STRICT = 15000L
     private const val MIN_BUNDLE_SIZE = 512
-    private const val ETAG_FILE = "etag.txt"
     private const val CONFIG_FILE = "loader.json"
     private const val RELEASES_API_URL = "https://api.github.com/repos/VenusIsJaded/rain/releases"
     private const val DEFAULT_BASE_URL = "https://github.com/VenusIsJaded/rain/releases/latest/download/"
-    private const val DEFAULT_BUNDLE_NAME = "rain.js"
+    private const val DEFAULT_JS_BUNDLE_NAME = "rain.js"
+    private const val DEFAULT_MIN_JS_BUNDLE_NAME = "rain.min.js"
+    private const val LEGACY_BUNDLE_FILE = "bundle.js"
+    private const val LEGACY_ETAG_FILE = "etag.txt"
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = with(packageParam) {
         cacheDir = File(appInfo.dataDir, Constants.CACHE_DIR).apply { mkdirs() }
         val filesDir = File(appInfo.dataDir, Constants.FILES_DIR).apply { mkdirs() }
 
-        bundle = File(cacheDir, Constants.MAIN_SCRIPT_FILE)
-        etag = File(cacheDir, ETAG_FILE)
+        embeddedBundleFormat = readEmbeddedBundleFormat(appInfo.sourceDir)
         configFile = File(filesDir, CONFIG_FILE)
         config = runCatching {
             if (configFile.exists()) JSON.decodeFromString<LoaderConfig>(configFile.readText()) else LoaderConfig()
         }.getOrDefault(LoaderConfig())
+        activeBundleFormat = currentBundleFormat()
 
         BridgeModule.registerMethod("updater.clear") {
-            if (bundle.exists()) bundle.delete()
-            if (etag.exists()) etag.delete()
+            clearCachedBundles()
             null
         }
 
@@ -180,6 +205,20 @@ object UpdaterModule : Module() {
             persistConfig(readPersistedConfig().copy(usePrereleases = enabled))
             null
         }
+
+        BridgeModule.registerMethod("updater.setBundleFormat") { args ->
+            val value = args.getOrNull(0)?.toString()?.lowercase()
+            val format = when (value) {
+                "js", "javascript" -> BundleFormat.JS
+                "hbc", "hermes" -> BundleFormat.HBC
+                else -> null
+            }
+
+            persistConfig(readPersistedConfig().copy(bundleFormat = format))
+            activeBundleFormat = currentBundleFormat()
+            clearCachedBundles()
+            null
+        }
     }
 
     fun downloadScript(activity: Activity? = null, showUpdateDialog: Boolean = true, isExplicit: Boolean = false): Job = scope.launch {
@@ -194,10 +233,13 @@ object UpdaterModule : Module() {
                 install(UserAgent) { agent = Constants.USER_AGENT }
                 install(HttpRedirect) { checkHttpMethod = false }
             }.use { client ->
-                val targetUrl = resolveTargetUrl(client)
-                Log.i("Fetching bundle: $targetUrl")
+                val target = resolveDownloadTarget(client)
+                val bundle = bundleFile(target.format)
+                val etag = etagFile(target.format)
 
-                val response: HttpResponse = client.get(targetUrl) {
+                Log.i("Fetching ${target.format.name.lowercase()} bundle: ${target.url}")
+
+                val response: HttpResponse = client.get(target.url) {
                     headers {
                         if (etag.exists() && bundle.exists()) {
                             append(HttpHeaders.IfNoneMatch, etag.readText())
@@ -225,7 +267,7 @@ object UpdaterModule : Module() {
                         }
 
                         response.headers[HttpHeaders.ETag]?.let { etag.writeText(it) } ?: etag.delete()
-                        Log.i("Bundle updated: ${bytes.size} bytes")
+                        Log.i("Bundle updated (${target.format.name.lowercase()}): ${bytes.size} bytes")
 
                         if (showUpdateDialog && activity != null) {
                             withContext(Dispatchers.Main) {
@@ -251,31 +293,77 @@ object UpdaterModule : Module() {
         }
     }
 
-    private suspend fun resolveTargetUrl(client: HttpClient): String {
-        if (config.customLoadUrl.enabled && config.customLoadUrl.url.isNotEmpty()) {
-            return config.customLoadUrl.url
+    fun currentBundleFile(): File = bundleFile(activeBundleFormat)
+
+    fun clearCachedBundles() {
+        if (!::cacheDir.isInitialized) return
+
+        BundleFormat.values().forEach { format ->
+            bundleFile(format).delete()
+            etagFile(format).delete()
         }
 
+        File(cacheDir, LEGACY_BUNDLE_FILE).delete()
+        File(cacheDir, LEGACY_ETAG_FILE).delete()
+    }
+
+    private suspend fun resolveDownloadTarget(client: HttpClient): DownloadTarget {
+        if (config.customLoadUrl.enabled && config.customLoadUrl.url.isNotEmpty()) {
+            val url = config.customLoadUrl.url
+            val format = inferBundleFormatFromUrl(url) ?: currentBundleFormat()
+            activeBundleFormat = format
+            return DownloadTarget(url, format)
+        }
+
+        val target = resolveOfficialTarget(client, currentBundleFormat())
+        activeBundleFormat = target.format
+        return target
+    }
+
+    private suspend fun resolveOfficialTarget(client: HttpClient, preferredFormat: BundleFormat): DownloadTarget {
         return try {
             val release = resolveTargetRelease(client)
             val assets = release?.assets.orEmpty().associateBy { it.name }
 
-            // Prefer text JS for cross-version safety. Some newer Discord/RN/Hermes
-            // builds reject externally-loaded Hermes bytecode with
-            // "Compiling JS failed: Buffer misaligned". JS bundles still run on the
-            // versions where bytecode previously worked, so this keeps existing
-            // compatibility while avoiding the crash on affected versions.
-            assets["rain.min.js"]?.browserDownloadUrl
-                ?: assets[DEFAULT_BUNDLE_NAME]?.browserDownloadUrl
-                ?: run {
-                    val hermesVersion = withTimeoutOrNull(2000L) {
-                        runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
-                    } ?: 96
-                    assets["rain.$hermesVersion.hbc"]?.browserDownloadUrl
+            suspend fun hermesVersion(): Int? = withTimeoutOrNull(2000L) {
+                runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
+            }
+
+            when (preferredFormat) {
+                BundleFormat.HBC -> {
+                    val version = hermesVersion()
+                    val hbcUrl = version?.let { assets["rain.$it.hbc"]?.browserDownloadUrl }
+                    val jsUrl = assets[DEFAULT_MIN_JS_BUNDLE_NAME]?.browserDownloadUrl
+                        ?: assets[DEFAULT_JS_BUNDLE_NAME]?.browserDownloadUrl
+
+                    when {
+                        hbcUrl != null -> DownloadTarget(hbcUrl, BundleFormat.HBC)
+                        jsUrl != null -> DownloadTarget(jsUrl, BundleFormat.JS)
+                        else -> DownloadTarget(DEFAULT_BASE_URL + DEFAULT_JS_BUNDLE_NAME, BundleFormat.JS)
+                    }
                 }
-                ?: DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
+
+                BundleFormat.JS -> {
+                    val jsUrl = assets[DEFAULT_MIN_JS_BUNDLE_NAME]?.browserDownloadUrl
+                        ?: assets[DEFAULT_JS_BUNDLE_NAME]?.browserDownloadUrl
+                    val version = hermesVersion() ?: 96
+                    val hbcUrl = assets["rain.$version.hbc"]?.browserDownloadUrl
+
+                    when {
+                        jsUrl != null -> DownloadTarget(jsUrl, BundleFormat.JS)
+                        hbcUrl != null -> DownloadTarget(hbcUrl, BundleFormat.HBC)
+                        else -> DownloadTarget(DEFAULT_BASE_URL + DEFAULT_JS_BUNDLE_NAME, BundleFormat.JS)
+                    }
+                }
+            }
         } catch (e: Exception) {
-            DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
+            when (preferredFormat) {
+                BundleFormat.HBC -> DownloadTarget(
+                    DEFAULT_BASE_URL + "rain.${withTimeoutOrNull(2000L) { runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull() } ?: 96}.hbc",
+                    BundleFormat.HBC,
+                )
+                BundleFormat.JS -> DownloadTarget(DEFAULT_BASE_URL + DEFAULT_JS_BUNDLE_NAME, BundleFormat.JS)
+            }
         }
     }
 
@@ -331,4 +419,56 @@ object UpdaterModule : Module() {
     fun updateConfig(newConfig: LoaderConfig) {
         persistConfig(newConfig)
     }
+
+    private fun currentBundleFormat(): BundleFormat {
+        if (!::config.isInitialized) return embeddedBundleFormat
+        return config.bundleFormat ?: embeddedBundleFormat
+    }
+
+    private fun bundleFile(format: BundleFormat): File = File(
+        cacheDir,
+        when (format) {
+            BundleFormat.HBC -> Constants.MAIN_SCRIPT_FILE_HBC
+            BundleFormat.JS -> Constants.MAIN_SCRIPT_FILE_JS
+        }
+    )
+
+    private fun etagFile(format: BundleFormat): File = File(
+        cacheDir,
+        when (format) {
+            BundleFormat.HBC -> "etag.hbc.txt"
+            BundleFormat.JS -> "etag.js.txt"
+        }
+    )
+
+    private fun inferBundleFormatFromUrl(url: String): BundleFormat? {
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            path.endsWith(".hbc") -> BundleFormat.HBC
+            path.endsWith(".js") -> BundleFormat.JS
+            else -> null
+        }
+    }
+
+    private fun readEmbeddedBundleFormat(sourceDir: String?): BundleFormat {
+        if (sourceDir.isNullOrBlank()) return BundleFormat.HBC
+
+        return runCatching {
+            ZipFile(File(sourceDir)).use { zip ->
+                val entry = zip.getEntry("rain.json") ?: return@runCatching BundleFormat.HBC
+                zip.getInputStream(entry).use { input ->
+                    JSON.decodeFromString<EmbeddedInstallMetadata>(
+                        input.bufferedReader().readText()
+                    ).options.bundleFormat
+                }
+            }
+        }.onFailure {
+            Log.w("Failed to read embedded Rain install metadata, defaulting bundle format to HBC", it)
+        }.getOrDefault(BundleFormat.HBC)
+    }
+
+    private data class DownloadTarget(
+        val url: String,
+        val format: BundleFormat,
+    )
 }
