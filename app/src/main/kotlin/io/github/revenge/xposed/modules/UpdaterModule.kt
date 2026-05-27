@@ -138,7 +138,7 @@ object UpdaterModule : Module() {
     private lateinit var configFile: File
 
     private const val TIMEOUT_STRICT = 15000L
-    private const val MIN_BUNDLE_SIZE = 512
+    private const val MIN_BYTECODE_SIZE = 512
     private const val ETAG_FILE = "etag.txt"
     private const val CONFIG_FILE = "loader.json"
     private const val RELEASES_API_URL = "https://api.github.com/repos/VenusIsJaded/rain/releases"
@@ -209,7 +209,7 @@ object UpdaterModule : Module() {
                     HttpStatusCode.OK -> {
                         val bytes: ByteArray = response.body()
 
-                        if (bytes.size < MIN_BUNDLE_SIZE) {
+                        if (bytes.size < MIN_BYTECODE_SIZE) {
                             throw Exception("Payload too small (${bytes.size} bytes). Possible corrupt build.")
                         }
 
@@ -259,20 +259,13 @@ object UpdaterModule : Module() {
         return try {
             val release = resolveTargetRelease(client)
             val assets = release?.assets.orEmpty().associateBy { it.name }
+            val hermesVersion = withTimeoutOrNull(2000L) {
+                runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
+            } ?: 96
 
-            // Prefer text JS for cross-version safety. Some newer Discord/RN/Hermes
-            // builds reject externally-loaded Hermes bytecode with
-            // "Compiling JS failed: Buffer misaligned". JS bundles still run on the
-            // versions where bytecode previously worked, so this keeps existing
-            // compatibility while avoiding the crash on affected versions.
-            assets["rain.min.js"]?.browserDownloadUrl
+            assets["rain.$hermesVersion.hbc"]?.browserDownloadUrl
+                ?: assets["rain.min.js"]?.browserDownloadUrl
                 ?: assets[DEFAULT_BUNDLE_NAME]?.browserDownloadUrl
-                ?: run {
-                    val hermesVersion = withTimeoutOrNull(2000L) {
-                        runCatching { LibUnbound.getHermesRuntimeBytecodeVersion() }.getOrNull()
-                    } ?: 96
-                    assets["rain.$hermesVersion.hbc"]?.browserDownloadUrl
-                }
                 ?: DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
         } catch (e: Exception) {
             DEFAULT_BASE_URL + DEFAULT_BUNDLE_NAME
