@@ -22,13 +22,12 @@ import java.lang.reflect.Method
  *
  * Preload scripts should be placed in the [PRELOADS_DIR] directory inside the module's files directory.
  *
- * The main bundle should be placed in the [Constants.CACHE_DIR] directory as either
- * [Constants.MAIN_SCRIPT_FILE_HBC] or [Constants.MAIN_SCRIPT_FILE_JS], depending on the loader config.
+ * The main bundle should be placed in the [Constants.CACHE_DIR] directory named [Constants.MAIN_SCRIPT_FILE].
  * If the bundle file does not exist, it will attempt to load `assets://revenge.bundle` from the module's assets.
  */
 object HookScriptLoaderModule : Module() {
     private lateinit var preloadsDir: File
-    private lateinit var cacheDir: File
+    private lateinit var mainScript: File
 
     // Directory to read loader config from when checking disable flag
     private var moduleFilesDir: File? = null
@@ -53,10 +52,11 @@ object HookScriptLoaderModule : Module() {
     }
 
     override fun onLoad(packageParam: XC_LoadPackage.LoadPackageParam) = with(packageParam) {
-        cacheDir = File(appInfo.dataDir, Constants.CACHE_DIR).apply { asDir() }
+        val cacheDir = File(appInfo.dataDir, Constants.CACHE_DIR).apply { asDir() }
         val filesDir = File(appInfo.dataDir, Constants.FILES_DIR).apply { asDir() }
 
         preloadsDir = File(filesDir, PRELOADS_DIR).apply { asDir() }
+        mainScript = File(cacheDir, Constants.MAIN_SCRIPT_FILE).apply { asFile() }
 
         listOf(
             "com.facebook.react.runtime.ReactInstance\$loadJSBundle$1",
@@ -97,8 +97,6 @@ object HookScriptLoaderModule : Module() {
 
         val isCustomUrl = UpdaterModule.isCustomUrlEnabled
 
-        var mainScript = UpdaterModule.currentBundleFile().apply { asFile() }
-
         if (!mainScript.exists() || isCustomUrl) {
             // Only block the RN init thread if we absolutely MUST download the bundle
             runBlocking {
@@ -106,10 +104,6 @@ object HookScriptLoaderModule : Module() {
                 val download = async { UpdaterModule.downloadScript(showUpdateDialog = false).join() }
                 awaitAll(ready, download)
             }
-
-            // The requested bundle format can change after resolving a custom URL,
-            // so refresh the file path after download completes.
-            mainScript = UpdaterModule.currentBundleFile().apply { asFile() }
         } else {
             // PERF: Bundle exists locally! Do NOT wait for Activity.onCreate.
             // Fire the background update and let Hermes load the bundle instantly.

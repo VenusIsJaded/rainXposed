@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import io.github.revenge.xposed.modules.UpdaterModule
 import kotlinx.serialization.json.Json
+import java.io.File
 import kotlin.system.exitProcess
 
 class Utils {
@@ -28,7 +29,11 @@ class Utils {
                         }
 
                         1 -> {
-                            UpdaterModule.clearCachedBundles()
+                            val bundleFile = File(
+                                context.dataDir, "${Constants.CACHE_DIR}/${Constants.MAIN_SCRIPT_FILE}"
+                            )
+
+                            if (bundleFile.exists()) bundleFile.delete()
 
                             reloadApp()
                         }
